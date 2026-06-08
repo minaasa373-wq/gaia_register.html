@@ -1,1 +1,1 @@
-# gaia_register.html
+# gaia_register
