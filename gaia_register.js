@@ -4,7 +4,9 @@
    ======================================== */
 
 // ===== 設定 =====
-const GAS_URL = "https://script.google.com/macros/library/d/1JeLNUmt-0iZHRhUH_i-6zJ0GQhRx0p4fijjiZ-tFGoi-qXwsVawVbkM8/3"; // ← ここにGASのWebアプリURLを貼り付け
+// GAS のWebアプリURLは config.js（window.GAS_URL）で設定します。
+// 本体を差し替えてもURLが消えないよう、設定はこのファイルから分離しています。
+const GAS_URL = (typeof window !== "undefined" && window.GAS_URL) ? window.GAS_URL : "YOUR_GAS_URL_HERE";
 
 // ===== 状態 =====
 const state = {
