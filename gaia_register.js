@@ -19,7 +19,8 @@ const state = {
   currentDose: null,    // 用量モーダル選択中
   todaySales: 0,
   todayCount: 0,
-  todayItems: []
+  todayItems: [],
+  lastInvoiceNo: null   // 直近の印刷でサーバ採番された伝票番号
 };
 
 let itemIdCounter = 1;
@@ -497,21 +498,23 @@ function openReceipt() {
     document.getElementById("ownerName").focus();
     return;
   }
-  document.getElementById("receiptPreview").innerHTML = renderReceiptHtml(false);
+  // プレビュー段階では伝票番号は未確定（印刷時にサーバが採番する）
+  document.getElementById("receiptPreview").innerHTML = renderReceiptHtml(false, null);
   document.getElementById("receiptModal").classList.remove("hidden");
 }
 function closeReceipt() {
   document.getElementById("receiptModal").classList.add("hidden");
 }
 
-function renderReceiptHtml(forPrint) {
+// invoiceNo: サーバ採番された確定番号。null のときは「印刷時に採番」と表示（プレビュー用）
+function renderReceiptHtml(forPrint, invoiceNo) {
   const { subtotal, tax, total } = recalc();
   const owner = document.getElementById("ownerName").value.trim();
   const pet = document.getElementById("petName").value.trim();
   const staff = document.getElementById("staffSelect").value;
   const date = document.getElementById("visitDate").value;
   const dateDisp = formatDate(date);
-  const invoiceNo = generateInvoiceNo(date);
+  const invoiceDisp = invoiceNo ? invoiceNo : "（印刷時に採番）";
 
   const items = state.cart.map(item => {
     const amount = Math.round(item.qty * item.price);
@@ -544,7 +547,7 @@ function renderReceiptHtml(forPrint) {
       <div class="print-title">明　細　書</div>
       <div class="print-meta">
         <span>発行日：${dateDisp}</span>
-        <span>No. ${invoiceNo}</span>
+        <span>No. ${invoiceDisp}</span>
       </div>
       <div class="print-meta">
         <span>担当：${escapeHtml(staff)}</span>
@@ -571,7 +574,7 @@ function renderReceiptHtml(forPrint) {
     return `
       <div class="receipt-title">明　細　書</div>
       <div class="receipt-meta">
-        <div class="receipt-meta-row"><span>発行日：${dateDisp}</span><span>No. ${invoiceNo}</span></div>
+        <div class="receipt-meta-row"><span>発行日：${dateDisp}</span><span>No. ${invoiceDisp}</span></div>
         <div class="receipt-meta-row"><span>担当：${escapeHtml(staff)}</span><span></span></div>
       </div>
       <div class="receipt-customer">${escapeHtml(owner)} 様${pet ? `（${escapeHtml(pet)} ちゃん）` : ""}</div>
@@ -597,52 +600,76 @@ function renderReceiptHtml(forPrint) {
 }
 
 // ===== 印刷＋記録 =====
+// 【サーバ採番版の流れ】
+//   1. まずGASに記録 → サーバが伝票番号を採番して返す
+//   2. 記録成功 → 返ってきた番号で明細書（2枚）を組み立て → 印刷 → 会計確定（カートクリア）
+//   3. 記録失敗 → 印刷しない（番号なし伝票・記録漏れを防ぐ）。内容は保持してやり直せる
+let isPrinting = false; // 二度押し防止
 async function doPrint() {
-  // 印刷エリアを2枚分組み立て
-  const html1 = renderReceiptHtml(true);
-  const html2 = renderReceiptHtml(true);
-  document.getElementById("printArea").innerHTML = `
-    <div class="print-page">${html1}</div>
-    <div class="print-page">
-      <div class="print-watermark">控　え</div>
-      ${html2}
-    </div>
-  `;
+  if (isPrinting) return;
+  isPrinting = true;
+  const printBtn = document.getElementById("printBtn");
+  if (printBtn) printBtn.disabled = true;
 
-  // GASに記録（送信失敗してもプリントは進める）
-  const recordResult = await sendToGAS();
+  try {
+    // ---- 1. 先にGASへ記録（採番してもらう） ----
+    const result = await sendToGAS();
 
-  // 印刷
-  setTimeout(() => {
-    window.print();
+    if (!result.ok) {
+      // 記録できなかった → 印刷しない。内容は残す
+      showToast("記録できませんでした。印刷を中止しました（内容は保持）", "error");
+      return;
+    }
+
+    // ---- 2. 採番された番号で明細書（A5×2枚）を組み立て ----
+    const invoiceNo = result.invoiceNo;
+    state.lastInvoiceNo = invoiceNo;
+    const html1 = renderReceiptHtml(true, invoiceNo);
+    const html2 = renderReceiptHtml(true, invoiceNo);
+    document.getElementById("printArea").innerHTML = `
+      <div class="print-page">${html1}</div>
+      <div class="print-page">
+        <div class="print-watermark">控　え</div>
+        ${html2}
+      </div>
+    `;
+
+    // ---- 3. 印刷 → 会計確定 ----
     setTimeout(() => {
-      if (recordResult) {
-        // 記録に成功したときだけ会計を確定（カートクリア）
-        showToast("印刷＆スプシに記録しました");
+      window.print();
+      setTimeout(() => {
+        showToast("印刷＆スプシに記録しました（No. " + invoiceNo + "）");
         addToTodayStats();
         clearCart();
         closeReceipt();
-      } else {
-        // 記録できていない場合は内容を残す（やり直せるように）
-        showToast("記録できませんでした。内容は保持しています", "error");
-        closeReceipt();
-      }
-    }, 500);
-  }, 200);
+        isPrinting = false;
+        if (printBtn) printBtn.disabled = false;
+      }, 500);
+    }, 200);
+    return; // 後始末は上の setTimeout 内で行う
+
+  } catch (e) {
+    showToast("印刷処理でエラー：" + e.message, "error");
+  }
+
+  // 失敗系でここに到達した場合のフラグ解除
+  isPrinting = false;
+  if (printBtn) printBtn.disabled = false;
 }
 
 // ===== GASに送信 =====
+// 戻り値： { ok: true, invoiceNo: "000123" } / { ok: false }
+// 伝票番号はサーバが採番するので、送信データには含めない。
 async function sendToGAS() {
   if (GAS_URL === "YOUR_GAS_URL_HERE") {
     showToast("デモモード：記録は保存されません", "error");
-    return false;
+    return { ok: false };
   }
 
   const { subtotal, tax, total } = recalc();
   const data = {
     action: "record",
     visitDate: document.getElementById("visitDate").value,
-    invoiceNo: generateInvoiceNo(document.getElementById("visitDate").value),
     staff: document.getElementById("staffSelect").value,
     ownerName: document.getElementById("ownerName").value.trim(),
     petName: document.getElementById("petName").value.trim(),
@@ -665,11 +692,13 @@ async function sendToGAS() {
       body: JSON.stringify(data)
     });
     const json = await res.json();
-    if (json.result === "success") return true;
+    if (json.result === "success") {
+      return { ok: true, invoiceNo: json.invoiceNo || "" };
+    }
     throw new Error(json.message || "保存失敗");
   } catch (e) {
     showToast("記録エラー：" + e.message, "error");
-    return false;
+    return { ok: false };
   }
 }
 
@@ -761,12 +790,6 @@ function formatDate(iso) {
   if (!iso) return "";
   const [y, m, d] = iso.split("-");
   return `${y}年${parseInt(m)}月${parseInt(d)}日`;
-}
-function generateInvoiceNo(dateStr) {
-  if (!dateStr) dateStr = new Date().toISOString().slice(0, 10);
-  const ymd = dateStr.replace(/-/g, "").slice(2);
-  const seq = String(state.todayCount + 1).padStart(3, "0");
-  return ymd + "-" + seq;
 }
 
 function setConnStatus(level, text) {
