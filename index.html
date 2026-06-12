@@ -384,7 +384,7 @@ button { cursor: pointer; border: none; background: none; }
 }
 .search-box input {
   width: 100%;
-  padding: 7px 10px 7px 32px;
+  padding: 7px 32px 7px 32px;
   border: 1px solid var(--border);
   border-radius: 5px;
   background: var(--green-mid);
@@ -404,6 +404,26 @@ button { cursor: pointer; border: none; background: none; }
   font-size: 13px;
   opacity: 0.5;
 }
+/* 検索クリア（×）ボタン：入力があるときだけ表示 */
+.search-clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--border);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s;
+}
+.search-clear:hover { background: var(--muted); }
+.search-box.has-text .search-clear { display: flex; }
 
 .btn-powder {
   padding: 7px 14px;
@@ -525,34 +545,6 @@ button { cursor: pointer; border: none; background: none; }
   color: var(--hint);
   font-size: 13px;
 }
-
-/* ===== フッター（売上サマリー） ===== */
-.app-footer {
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-  padding: 6px 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-.summary-info {
-  color: var(--muted);
-}
-.summary-info strong {
-  color: var(--green-dark);
-  font-size: 13px;
-}
-.btn-summary {
-  padding: 4px 12px;
-  background: var(--green-light);
-  color: var(--green);
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 500;
-}
-.btn-summary:hover { background: var(--green); color: #fff; }
 
 /* ===== モーダル共通 ===== */
 .modal-overlay {
@@ -1118,8 +1110,9 @@ button { cursor: pointer; border: none; background: none; }
     <!-- 右：商品エリア -->
     <section class="product-panel">
       <div class="product-toolbar">
-        <div class="search-box">
+        <div class="search-box" id="searchBox">
           <input type="text" id="searchInput" placeholder="品名・カナ・略称で検索">
+          <button class="search-clear" id="searchClear" onclick="clearSearch()" title="検索をクリア">×</button>
         </div>
         <button class="btn-powder" onclick="openPowderModal()">＋ 粉薬を追加</button>
       </div>
@@ -1127,14 +1120,6 @@ button { cursor: pointer; border: none; background: none; }
       <div class="product-grid" id="productGrid"></div>
     </section>
   </main>
-
-  <!-- フッター -->
-  <footer class="app-footer">
-    <div class="summary-info">
-      📊 本日の売上：<strong id="todaySales">¥0</strong>　/　<strong id="todayCount">0</strong> 件
-    </div>
-    <button class="btn-summary" onclick="showSummary()">日計詳細</button>
-  </footer>
 </div>
 
 <!-- ============ 用量モーダル ============ -->
@@ -1209,20 +1194,6 @@ button { cursor: pointer; border: none; background: none; }
     <div class="modal-footer">
       <button class="btn-cancel" onclick="closeReceipt()">編集に戻る</button>
       <button class="btn-confirm" id="printBtn" onclick="doPrint()">🖨 印刷＋記録（A5×2枚）</button>
-    </div>
-  </div>
-</div>
-
-<!-- ============ 日計サマリー ============ -->
-<div class="modal-overlay hidden" id="summaryModal">
-  <div class="modal">
-    <div class="modal-header">
-      <span class="modal-title">本日の売上</span>
-      <button class="modal-close" onclick="closeSummary()">×</button>
-    </div>
-    <div class="modal-body" id="summaryBody"></div>
-    <div class="modal-footer">
-      <button class="btn-cancel" onclick="closeSummary()">閉じる</button>
     </div>
   </div>
 </div>
