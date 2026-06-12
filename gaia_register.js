@@ -410,7 +410,10 @@ function renderCart() {
   const list = document.getElementById("cartList");
   if (state.cart.length === 0) {
     list.innerHTML = `<div class="cart-empty">商品タイルをタップして<br>診療内容を追加してください</div>`;
-    closeEdit();
+    // ※ここで closeEdit() を呼ぶと closeEdit→renderCart→closeEdit... の無限再帰になる。
+    //   そのため編集パネルは直接閉じる（renderCart は呼ばない）。
+    state.selectedItemId = null;
+    document.getElementById("editPanel").classList.add("hidden");
   } else {
     list.innerHTML = state.cart.map(item => {
       const amount = Math.round(item.qty * item.price);
@@ -618,35 +621,23 @@ function renderReceiptHtml(forPrint, invoiceNo) {
 //   1. まずGASに記録 → サーバが伝票番号を採番して返す
 //   2. 記録成功 → 返ってきた番号で明細書（2枚）を組み立て → 印刷 → 会計確定（カートクリア）
 //   3. 記録失敗 → 印刷しない（番号なし伝票・記録漏れを防ぐ）。内容は保持してやり直せる
-let isPrinting = false; // 二度押し防止
-
-// 印刷ロックを解除（ボタンを再びクリック可能に戻す）
-function releasePrintLock() {
-  isPrinting = false;
-  const printBtn = document.getElementById("printBtn");
-  if (printBtn) printBtn.disabled = false;
-}
-
+//
+// ※二度押し防止のためにボタンを disabled にする処理は入れない。
+//   disabled が解除されずボタンが固まる事故のほうが現場で困るため。
+//   二重記録の本対策は A-2（client_id をGAS側で重複検出）に委ねる。
 async function doPrint() {
-  if (isPrinting) return;
-  isPrinting = true;
-  const printBtn = document.getElementById("printBtn");
-  if (printBtn) printBtn.disabled = true;
-
   // ---- 1. 先にGASへ記録（採番してもらう） ----
   let result;
   try {
     result = await sendToGAS();
   } catch (e) {
     showToast("記録処理でエラー：" + e.message, "error");
-    releasePrintLock();
     return;
   }
 
   if (!result.ok) {
     // 記録できなかった → 印刷しない。内容は残す
     showToast("記録できませんでした。印刷を中止しました（内容は保持）", "error");
-    releasePrintLock();
     return;
   }
 
@@ -663,26 +654,19 @@ async function doPrint() {
     </div>
   `;
 
-  // ---- 3. 会計を確定 → 印刷 ----
-  // 記録（採番）は既に成功しているので、ここで会計を確定し、
-  // 「印刷を開始する前に」ロックを解除する。
-  // ※iPad Safari/Chrome では window.print() が印刷ダイアログ操作（印刷/キャンセル）まで
-  //   ブロックしたり、ダイアログ表示中にタイマーが遅延・停止することがある。
-  //   印刷完了を待ってロック解除する方式だと、ここでボタンが固まる。
-  //   そのため「印刷の成否や操作に依存せず」先にロック解除する。
   showToast("スプシに記録しました（No. " + invoiceNo + "）");
-  clearCart();
-  closeReceipt();
-  releasePrintLock();
 
-  // 印刷を実行（このあとボタンは既に復活済みなので、固まらない）
+  // ---- 3. 印刷 ----
+  // 印刷内容は既に printArea に書き込み済みなので、
+  // この後にカートをクリアしても印刷物には影響しない。
+  window.print();
+
+  // ---- 4. 会計確定（カートクリア） ----
+  // 印刷ダイアログを閉じた後に実行されるよう、わずかに遅延させる。
   setTimeout(() => {
-    try {
-      window.print();
-    } catch (e) {
-      showToast("印刷でエラー：" + e.message, "error");
-    }
-  }, 200);
+    clearCart();
+    closeReceipt();
+  }, 300);
 }
 
 // ===== GASに送信 =====
